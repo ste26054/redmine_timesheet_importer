@@ -3,11 +3,17 @@
 <% end %>
 
 <h2><%= l(:label_import_result) %></h2>
-<p><%= l(:label_result_notice, :handle_count => @handle_count, :success_count => @handle_count) %></p>
-<p><%= l(:label_result_projects) %><br/>
-<% @affect_projects_issues.each do |project, count|%>
-<label class="tabular2"><%= project %>:</label><label class="tabular2"><%= l(:label_result_issues, count) %></label><br/>
-<% end %></p>
+
+<% if @failed_count == 0 %>
+	<p><%= l(:label_result_notice, :handle_count => @handle_count, :success_count => @handle_count) %></p>
+	<p><%= l(:label_result_projects) %><br/>
+	<% @affect_projects_issues.each do |project, count|%>
+	<label class="tabular2"><%= project %>:</label><label class="tabular2"><%= l(:label_result_issues, count) %></label><br/>
+	<% end %></p>
+
+<% else %>
+	<h3><%= l(:label_import_error) %></h3>
+<% end %>
 
 <% if not @messages.empty? %>
 	<hr/>
@@ -24,7 +30,7 @@
 	<h3><%= l(:label_result_failed, @failed_count) %></h3>
 	<table class="list">
 		<thead><tr>
-			<th>#</th>
+			<th><%= l(:label_result_row_num) %></th>
 			<% @headers.each do |column| %>
 			<th><%= column.unpack('U*').pack('U*')  %></th>
 			<% end %>

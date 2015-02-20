@@ -17,11 +17,11 @@ class TimesheetImporterController < ApplicationController
   unloadable
   
   #before_filter :find_project
-
-  ISSUE_ATTRS = [:id, :subject, :assigned_to, :fixed_version,
-    :author, :description, :category, :priority, :tracker, :status,
-    :start_date, :due_date, :done_ratio, :estimated_hours,
-    :parent_issue, :watchers ]
+##
+#  ISSUE_ATTRS = [:id, :subject, :assigned_to, :fixed_version,
+#    :author, :description, :category, :priority, :tracker, :status,
+#    :start_date, :due_date, :done_ratio, :estimated_hours,
+#    :parent_issue, :watchers ]
 
   TIME_ENTRY_ISSUE_ATTRS = [:id, :user_login, :update_date, :hours, :comment, :activity, :notes, :project]
   
@@ -198,29 +198,8 @@ class TimesheetImporterController < ApplicationController
   end
     
   
-  # Returns the id for the given version or raises RecordNotFound.
-  # Implements a cache of version ids based on version name
-  # If add_versions is true and a valid name is given,
-  # will create a new version and save it when it doesn't exist yet.
-  def version_id_for_name!(project,name,add_versions)
-    if !@version_id_by_name.has_key?(name)
-      version = Version.find_by_project_id_and_name(project.id, name)
-      if !version
-        if name && (name.length > 0) && add_versions
-          version = project.versions.build(:name=>name)
-          version.save
-        else
-          @unfound_class = "Version"
-          @unfound_key = name
-          raise ActiveRecord::RecordNotFound, "No version named #{name}"
-        end
-      end
-      @version_id_by_name[name] = version.id
-    end
-    @version_id_by_name[name]
-  end
-  
   def result
+    @time_entry_ids = []
     @handle_count = 0
     @update_count = 0
     @skip_count = 0
@@ -249,25 +228,11 @@ class TimesheetImporterController < ApplicationController
       return
     end
     
-    #default_tracker = params[:default_tracker]
-    #update_issue = params[:update_issue]
-    #unique_field = params[:unique_field].empty? ? nil : params[:unique_field]
-    #journal_field = params[:journal_field]
-    #update_other_project = params[:update_other_project]
-    #ignore_non_exist = params[:ignore_non_exist]
+
     fields_map = {}
     params[:fields_map].each { |k, v| fields_map[k.unpack('U*').pack('U*')] = v }
-    #send_emails = params[:send_emails]
-    #add_categories = params[:add_categories]
-    #add_versions = params[:add_versions]
-    #unique_attr = fields_map[unique_field]
-    #unique_attr_checked = false  # Used to optimize some work that has to happen inside the loop   
-
     # attrs_map is fields_map's invert
     attrs_map = fields_map.invert
-
-    # check params
-    unique_error = nil
 
 
     # BEGIN CSV ROW LOOP
@@ -275,52 +240,65 @@ class TimesheetImporterController < ApplicationController
     CSV.new(iip.csv_data, {:headers=>true,
                            :encoding=>iip.encoding,
                            :quote_char=>iip.quote_char,
-                           :col_sep=>iip.col_sep}).each do |row|
+                           :col_sep=>iip.col_sep}).each_with_index do |row, index|
 
-      #timesheet_status = to_boolean(row[attrs_map["timesheet"]])
-      timesheet_status = true
 
       
 
-      if !timesheet_status
-
-
-        
-
-        
-      else
         #TODO: check if issue id exists
         begin
-          time_entry = TimeEntry.new(:issue_id => row[attrs_map["id"]], 
+          issue = Issue.find_by_id!(row[attrs_map["id"]])
+          project = Project.find_by_id!(issue.project_id)
+
+          @affect_projects_issues.has_key?(project.name) ?
+          @affect_projects_issues[project.name] += 1 : @affect_projects_issues[project.name] = 1
+
+
+          time_entry = TimeEntry.new(:issue_id => issue.id, 
                                     :spent_on => Date.parse(row[attrs_map["update_date"]]),
                                     :activity => TimeEntryActivity.find_by_name(row[attrs_map["activity"]]),
                                     :hours => row[attrs_map["hours"]],
                                     :comments => row[attrs_map["comment"]], 
                                     :user => User.find_by_login(row[attrs_map["user_login"]]))
-          #time_entry.save!
-        unless time_entry.save
-          @failed_count += 1
-          @failed_issues[@failed_count] = row
-          @messages << "Warning: The following data-validation errors occurred on time_entry #{@failed_count} in the list below"
-          time_entry.errors.each do |attr, error_message|
-            @messages << "Error: #{attr} #{error_message}"
-          end
-        else
+          time_entry.save!
 
+          @time_entry_ids.push(time_entry.id)
           @handle_count += 1
-
-
+        rescue
+          @failed_count += 1
+          @failed_issues[index] = row
+          @messages << "Warning: The following data-validation errors occurred on time_entry #{@failed_count} in the list below"
+          
+          if time_entry != nil
+            time_entry.errors.each do |attr, error_message|
+              @messages << "Error: #{attr} #{error_message}"
+            end
+          end
+          next
         end
-      
-      end
-      end # ENDIF
-    end 
+        #unless time_entry.save
+          
 
+        #else
+
+        #end
+     
+    end 
     #END CSV ROW LOOP
     
     if @failed_issues.size > 0
+      @handle_count = 0
       @failed_issues = @failed_issues.sort
       @headers = @failed_issues[0][1].headers
+
+      @time_entry_ids.each do |entry_id|
+        entry = TimeEntry.find_by_id(entry_id)
+        unless entry.delete
+          @messages << "Error: Time entry #{entry_id} could not be deleted."
+        end
+      end
+
+      @messages << "Warning: The Timesheet was not imported due to errors. Please correct them and try again"
     end
     
     # Clean up after ourselves
