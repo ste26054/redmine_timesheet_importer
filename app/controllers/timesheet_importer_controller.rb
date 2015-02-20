@@ -129,44 +129,6 @@ class TimesheetImporterController < ApplicationController
     @attrs.sort!
   end
   
-  # Returns the issue object associated with the given value of the given attribute.
-  # Raises NoIssueForUniqueValue if not found or MultipleIssuesForUniqueValue
-  def issue_for_unique_attr(unique_attr, attr_value, row_data)
-    if @issue_by_unique_attr.has_key?(attr_value)
-      return @issue_by_unique_attr[attr_value]
-    end
-
-    if unique_attr == "id"
-      issues = [Issue.find_by_id(attr_value)]
-    else
-      # Use IssueQuery class Redmine >= 2.3.0
-      begin
-        if Module.const_get('IssueQuery') && IssueQuery.is_a?(Class)
-          query_class = IssueQuery
-        end
-      rescue NameError
-        query_class = Query
-      end
-
-      query = query_class.new(:name => "_importer", :project => @project)
-      query.add_filter("status_id", "*", [1])
-      query.add_filter(unique_attr, "=", [attr_value])
-      
-      issues = Issue.find :all, :conditions => query.statement, :limit => 2, :include => [ :assigned_to, :status, :tracker, :project, :priority, :category, :fixed_version ]
-    end
-    
-    if issues.size > 1
-      @failed_count += 1
-      @failed_issues[@failed_count] = row_data
-      @messages << "Warning: Unique field #{unique_attr} with value '#{attr_value}' in issue #{@failed_count} has duplicate record"
-      raise MultipleIssuesForUniqueValue, "Unique field #{unique_attr} with value '#{attr_value}' has duplicate record"
-      else
-      if issues.size == 0
-        raise NoIssueForUniqueValue, "No issue with #{unique_attr} of '#{attr_value}' found"
-      end
-      issues.first
-    end
-  end
 
   # Returns the id for the given user or raises RecordNotFound
   # Implements a cache of users based on login name
@@ -242,39 +204,62 @@ class TimesheetImporterController < ApplicationController
                            :quote_char=>iip.quote_char,
                            :col_sep=>iip.col_sep}).each_with_index do |row, index|
 
+      issue = nil
+      project = nil
+      date = nil
+      time_entry = nil
+      user = nil
+      time_entry_activity = nil
 
+      error = false
       
 
         #TODO: check if issue id exists
         begin
           issue = Issue.find_by_id!(row[attrs_map["id"]])
           project = Project.find_by_id!(issue.project_id)
-
+          date = Date.parse(row[attrs_map["update_date"]])
+          user = User.find_by_login!(row[attrs_map["user_login"]])
+          time_entry_activity = TimeEntryActivity.find_by_name!(row[attrs_map["activity"]])
           @affect_projects_issues.has_key?(project.name) ?
           @affect_projects_issues[project.name] += 1 : @affect_projects_issues[project.name] = 1
 
 
           time_entry = TimeEntry.new(:issue_id => issue.id, 
-                                    :spent_on => Date.parse(row[attrs_map["update_date"]]),
-                                    :activity => TimeEntryActivity.find_by_name(row[attrs_map["activity"]]),
+                                    :spent_on => date,
+                                    :activity => time_entry_activity,
                                     :hours => row[attrs_map["hours"]],
                                     :comments => row[attrs_map["comment"]], 
-                                    :user => User.find_by_login(row[attrs_map["user_login"]]))
+                                    :user => user)
           time_entry.save!
 
-          @time_entry_ids.push(time_entry.id)
-          @handle_count += 1
-        rescue
-          @failed_count += 1
-          @failed_issues[index] = row
-          @messages << "Warning: The following data-validation errors occurred on time_entry #{@failed_count} in the list below"
+          
+        rescue ArgumentError => e
+          @messages << "Error row #{index}: #{e.message}"
+          error = true
+        rescue ActiveRecord::RecordNotFound => e
+          @messages << "Error row #{index}: #{e.message}"
+          error = true
+        rescue 
+          #@messages << "Warning: The following data-validation errors occurred Row #{index} in the list below"
           
           if time_entry != nil
             time_entry.errors.each do |attr, error_message|
-              @messages << "Error: #{attr} #{error_message}"
+              @messages << "Error row #{index}: #{attr} #{error_message}"
             end
           end
-          next
+
+          error = true
+
+        else
+          @time_entry_ids.push(time_entry.id)
+          @handle_count += 1
+
+        ensure
+          if error
+            @failed_count += 1
+            @failed_issues[index] = row
+          end
         end
         #unless time_entry.save
           
@@ -294,11 +279,10 @@ class TimesheetImporterController < ApplicationController
       @time_entry_ids.each do |entry_id|
         entry = TimeEntry.find_by_id(entry_id)
         unless entry.delete
-          @messages << "Error: Time entry #{entry_id} could not be deleted."
+          logger.info "Timesheet import Error: Time entry #{entry_id} could not be deleted."
         end
       end
 
-      @messages << "Warning: The Timesheet was not imported due to errors. Please correct them and try again"
     end
     
     # Clean up after ourselves

@@ -25,7 +25,7 @@ en:
   label_rule_name: "Input rule name"
   
   label_import_result: "Import Result"
-  label_import_error: "The importation was cancelled due to errors in the Timesheet. Please fix the errors below in the CSV file, then try the imporation process again"
+  label_import_error: "The importation was cancelled due to errors in the Timesheet. Please fix the errors below in the CSV file, then try the import process again"
   label_result_notice: "%{handle_count} time entries processed.  %{success_count} time entries successfully imported."
   label_result_projects: "Affected projects:"
   label_result_issues: "%{count} issues"
