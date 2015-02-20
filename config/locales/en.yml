@@ -1,6 +1,6 @@
 en:
-  label_import: "Import Timesheet"
-  label_issue_importer: "Timesheet Importer"
+  label_import_timesheet: "Import Timesheet BORDEL"
+  label_timesheet_importer: "Timesheet Importer"
   label_upload_notice: "Select a CSV file to import. Import file must have a header row. Maximum size 4MB."
   label_upload_format: "File format settings"
   label_upload_encoding: "Encoding:"
