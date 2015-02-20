@@ -16,14 +16,8 @@ end
 class TimesheetImporterController < ApplicationController
   unloadable
   
-  #before_filter :find_project
-##
-#  ISSUE_ATTRS = [:id, :subject, :assigned_to, :fixed_version,
-#    :author, :description, :category, :priority, :tracker, :status,
-#    :start_date, :due_date, :done_ratio, :estimated_hours,
-#    :parent_issue, :watchers ]
 
-  TIME_ENTRY_ISSUE_ATTRS = [:id, :user_login, :update_date, :hours, :comment, :activity, :notes, :project]
+  TIME_ENTRY_ISSUE_ATTRS = [:id, :user_login, :update_date, :hours, :comment, :activity, :notes]
   
   def index
   end
@@ -126,7 +120,6 @@ class TimesheetImporterController < ApplicationController
       @attrs.push([l_or_humanize(attr, :prefix=>"field_"), attr])
     end
 
-    @attrs.sort!
   end
   
 
@@ -193,10 +186,11 @@ class TimesheetImporterController < ApplicationController
 
     fields_map = {}
     params[:fields_map].each { |k, v| fields_map[k.unpack('U*').pack('U*')] = v }
+    
     # attrs_map is fields_map's invert
     attrs_map = fields_map.invert
 
-
+    @errs = Hash.new { |hash, key| hash[key] = {} }
     # BEGIN CSV ROW LOOP
 
     CSV.new(iip.csv_data, {:headers=>true,
@@ -212,15 +206,22 @@ class TimesheetImporterController < ApplicationController
       time_entry_activity = nil
 
       error = false
+
       
 
         #TODO: check if issue id exists
         begin
-          issue = Issue.find_by_id!(row[attrs_map["id"]])
-          project = Project.find_by_id!(issue.project_id)
-          date = Date.parse(row[attrs_map["update_date"]])
           user = User.find_by_login!(row[attrs_map["user_login"]])
+          date = Date.parse(row[attrs_map["update_date"]])
+          issue = Issue.find_by_id!(row[attrs_map["id"]])
+          
+        
+        
+
+          project = Project.find_by_id!(issue.project_id)
+          
           time_entry_activity = TimeEntryActivity.find_by_name!(row[attrs_map["activity"]])
+
           @affect_projects_issues.has_key?(project.name) ?
           @affect_projects_issues[project.name] += 1 : @affect_projects_issues[project.name] = 1
 
@@ -236,10 +237,14 @@ class TimesheetImporterController < ApplicationController
           
         rescue ArgumentError => e
           @messages << "Error row #{index}: #{e.message}"
+          date == nil ? @errs[:spent_on][index] = true : nil
           error = true
         rescue ActiveRecord::RecordNotFound => e
           @messages << "Error row #{index}: #{e.message}"
           error = true
+          issue == nil ? @errs[:issue_id][index] = true : nil
+          user == nil ? @errs[:user][index] = true : nil
+          next
         rescue 
           #@messages << "Warning: The following data-validation errors occurred Row #{index} in the list below"
           
@@ -282,6 +287,7 @@ class TimesheetImporterController < ApplicationController
           logger.info "Timesheet import Error: Time entry #{entry_id} could not be deleted."
         end
       end
+      flash_message("error_message",@errs)
 
     end
     
