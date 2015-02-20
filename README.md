@@ -9,9 +9,8 @@ Allows administrators to import CSV formated timesheets
 
 Here are the headers required (a mapping is possible):
 
-| Column:   | id       | user_login                              | update_date                                   | hours                            | comment                   | activity      | notes                                  |
-|-----------|----------|-----------------------------------------|-----------------------------------------------|----------------------------------|---------------------------|---------------|----------------------------------------|
-| Comment:  | Issue ID | Login name who logged time on the issue | Date when the user has created the time entry | Hours logged for this time entry | Comment on the Time Entry | Activity type | Notes which will appear in the history |
-| Required: | *        | *                                       | *                                             | *                                |                           | *             |                                        |
-|           |          |                                         |                                               |                                  |                           |               |                                        |
-|           |          |                                         |                                               |                                  |                           |               |                                        |
+| HEADER | id | user_login | update_date | hours | comment | activity | notes |
+|----------|:--------:|:---------------------------------------:|:---------------------------------------------:|:--------------------------------:|:-------------------------:|:-------------:|:--------------------------------------:|
+| COMMENTS | Issue ID | Login name who logged time on the issue | Date when the user has created the time entry | Hours logged for this time entry | Comment on the Time Entry | Activity type | Notes which will appear in the history |
+|  | * | * | * | * |  | * |  |
+|  |  |  |  |  |  |  |  |
