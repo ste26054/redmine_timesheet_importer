@@ -1,3 +1,3 @@
-match '/importer/index', :to => 'importer#index', :via => [:get, :post]
-match '/importer/match', :to => 'importer#match', :via => [:get, :post]
-match '/importer/result', :to => 'importer#result', :via => [:get, :post]
+match '/timesheet_importer/index', :to => 'timesheet_importer#index', :via => [:get, :post]
+match '/timesheet_importer/match', :to => 'timesheet_importer#match', :via => [:get, :post]
+match '/timesheet_importer/result', :to => 'timesheet_importer#result', :via => [:get, :post]

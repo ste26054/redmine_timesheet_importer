@@ -11,6 +11,6 @@ Redmine::Plugin.register :redmine_timesheet_importer do
   #project_module :importer do
   #  permission :import, :importer => :index
   #end
-  menu :top_menu, :importer, { :controller => 'importer', :action => 'index' }, :caption => :label_import, :before => :settings, :param => :project_id,
-  :if => Proc.new { User.current.admin? }
+  menu :top_menu, :timesheet_importer, { :controller => 'timesheet_importer', :action => 'index' }, :caption => :label_import, :before => :settings,
+  	:if => Proc.new { User.current.admin? }
 end

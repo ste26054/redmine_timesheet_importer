@@ -13,10 +13,10 @@ Journal.class_exec do
   end
 end
 
-class ImporterController < ApplicationController
+class TimesheetImporterController < ApplicationController
   unloadable
   
-  before_filter :find_project
+  #before_filter :find_project
 
   ISSUE_ATTRS = [:id, :subject, :assigned_to, :fixed_version,
     :author, :description, :category, :priority, :tracker, :status,
@@ -598,11 +598,11 @@ class ImporterController < ApplicationController
         else
 
           @handle_count += 1
-	  logger.info "Time entry created with id: #{time_entry.id}"
+
 
         end
-	end      
-
+      
+      end
       end # ENDIF
     end 
 
