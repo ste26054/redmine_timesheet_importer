@@ -15,9 +15,9 @@ end
 
 class TimesheetImporterController < ApplicationController
   unloadable
-  
 
-  TIME_ENTRY_ISSUE_ATTRS = [:id, :user_login, :update_date, :hours, :comment, :activity, :notes]
+
+  TIME_ENTRY_ISSUE_ATTRS = [:id, :login, :update_date, :hours, :comment, :activity, :notes]
   
   def index
   end
@@ -86,7 +86,7 @@ class TimesheetImporterController < ApplicationController
       end
 
       flash[:error] = error_message
-
+h
       redirect_to importer_index_path
 
       return
@@ -203,6 +203,7 @@ class TimesheetImporterController < ApplicationController
       date = nil
       time_entry = nil
       user = nil
+      journal = nil
       time_entry_activity = nil
 
       error = false
@@ -211,7 +212,8 @@ class TimesheetImporterController < ApplicationController
 
         #TODO: check if issue id exists
         begin
-          user = User.find_by_login!(row[attrs_map["user_login"]])
+          
+          user = User.find_by_login!(row[attrs_map["login"]])
           date = Date.parse(row[attrs_map["update_date"]])
           issue = Issue.find_by_id!(row[attrs_map["id"]])
           
@@ -225,26 +227,55 @@ class TimesheetImporterController < ApplicationController
           @affect_projects_issues.has_key?(project.name) ?
           @affect_projects_issues[project.name] += 1 : @affect_projects_issues[project.name] = 1
 
+          if issue != nil && user != nil
 
-          time_entry = TimeEntry.new(:issue_id => issue.id, 
-                                    :spent_on => date,
-                                    :activity => time_entry_activity,
-                                    :hours => row[attrs_map["hours"]],
-                                    :comments => row[attrs_map["comment"]], 
-                                    :user => user)
-          time_entry.save!
+            logger.info "#{index}: ISSUE ID: #{issue.id}. User: #{user} User ID: #{user.id}. ID Assigned to: #{issue.assigned_to_id}."
+            #if user.member_of?(issue.project) || user.admin?
+            #  logger.info "#{index} USER HAS RIGHTS TO UPDATE ISSUE"
+            #else
+            #  logger.info "#{index} USER IS NOT ALLOWED TO UPDATE ISSUE"
+            #end
+            if issue.watched_by?(user) || user.id == issue.assigned_to_id #|| user.admin?
+              
+              time_entry = TimeEntry.new(:issue_id => issue.id, 
+                                          :spent_on => date,
+                                          :activity => time_entry_activity,
+                                          :hours => row[attrs_map["hours"]],
+                                          :comments => row[attrs_map["comment"]], 
+                                          :user => user)
 
+              journal = Journal.new(:journalized => issue,
+                                    :user => user,
+                                    :notes => row[attrs_map["notes"]],
+                                    :created_on => date)
+
+              time_entry.save!
+              journal.save!
+            else
+              raise "User #{user} is not an assignee or a watcher of the Issue #{issue}"
+            end
+            #if user.allowed_to?(:edit_issues, issue.project)
+            #  logger.info "#{index} USER ALLOWED TO EDIT ISSUE"
+            #end
+
+          end
+
+          
           
         rescue ArgumentError => e
           @messages << "Error row #{index}: #{e.message}"
           date == nil ? @errs[:spent_on][index] = true : nil
           error = true
+          next
         rescue ActiveRecord::RecordNotFound => e
           @messages << "Error row #{index}: #{e.message}"
           error = true
           issue == nil ? @errs[:issue_id][index] = true : nil
           user == nil ? @errs[:user][index] = true : nil
           next
+        rescue RuntimeError => e
+          @messages << "Error row #{index}: #{e.message}"
+          error = true
         rescue 
           #@messages << "Warning: The following data-validation errors occurred Row #{index} in the list below"
           
@@ -255,7 +286,7 @@ class TimesheetImporterController < ApplicationController
           end
 
           error = true
-
+          next
         else
           @time_entry_ids.push(time_entry.id)
           @handle_count += 1
@@ -287,7 +318,6 @@ class TimesheetImporterController < ApplicationController
           logger.info "Timesheet import Error: Time entry #{entry_id} could not be deleted."
         end
       end
-      flash_message("error_message",@errs)
 
     end
     
