@@ -116,9 +116,13 @@ class TimesheetImporterController < ApplicationController
     # fields
     @attrs = Array.new
   
+    # Humanizes fields: e.g. update_date -> Update date
+    #for each entry of attrs: [humanized symbol, :symbol]
     TIME_ENTRY_ISSUE_ATTRS.each do |attr|
       @attrs.push([l_or_humanize(attr, :prefix=>"field_"), attr])
     end
+
+    logger.info "#{@attrs}"
 
   end
   
@@ -185,10 +189,14 @@ class TimesheetImporterController < ApplicationController
     
 
     @fields_map = {}
+
     params[:fields_map].each { |k, v| @fields_map[k.unpack('U*').pack('U*')] = v }
     
     # attrs_map is fields_map's invert
     attrs_map = @fields_map.invert
+
+    # Convert string string hash keys to symbol
+    attrs_map = Hash[attrs_map.map{ |k, v| [k.to_sym, v] }]
 
     @errs = Hash.new { |hash, key| hash[key] = {} }
     # BEGIN CSV ROW LOOP
@@ -208,42 +216,37 @@ class TimesheetImporterController < ApplicationController
 
       error = false
 
-      
-
-        #TODO: check if issue id exists
         begin
           
-          user = User.find_by_login!(row[attrs_map["login"]])
-          date = Date.parse(row[attrs_map["update_date"]])
-          issue = Issue.find_by_id!(row[attrs_map["id"]])
-          
-          project = Project.find_by_id!(issue.project_id)
-          
-          time_entry_activity = TimeEntryActivity.find_by_name!(row[attrs_map["activity"]])
+          user = User.find_by_login!(row[attrs_map[:login]])
+          issue = Issue.find_by_id!(row[attrs_map[:id]])
+          date = Date.parse(row[attrs_map[:update_date]])
+          time_entry_activity = TimeEntryActivity.find_by_name!(row[attrs_map[:activity]])
 
-          @affect_projects_issues.has_key?(project.name) ?
-          @affect_projects_issues[project.name] += 1 : @affect_projects_issues[project.name] = 1
+         
 
           if issue != nil && user != nil
 
+            project = Project.find_by_id!(issue.project_id)
+            @affect_projects_issues.has_key?(project.name) ? @affect_projects_issues[project.name] += 1 : @affect_projects_issues[project.name] = 1
             #logger.info "#{index}: ISSUE ID: #{issue.id}. User: #{user} User ID: #{user.id}. ID Assigned to: #{issue.assigned_to_id}."
             #if user.member_of?(issue.project) || user.admin?
             #  logger.info "#{index} USER HAS RIGHTS TO UPDATE ISSUE"
             #else
             #  logger.info "#{index} USER IS NOT ALLOWED TO UPDATE ISSUE"
             #end
-            if issue.watched_by?(user) || user.id == issue.assigned_to_id #|| user.admin?
+            if issue.watched_by?(user) || user.id == issue.assigned_to_id || user.admin?
 
               time_entry = TimeEntry.new(:issue_id => issue.id, 
                                           :spent_on => date,
                                           :activity => time_entry_activity,
-                                          :hours => row[attrs_map["hours"]],
-                                          :comments => row[attrs_map["comment"]], 
+                                          :hours => row[attrs_map[:hours]],
+                                          :comments => row[attrs_map[:comment]], 
                                           :user => user)
 
               journal = Journal.new(:journalized => issue,
                                     :user => user,
-                                    :notes => row[attrs_map["notes"]],
+                                    :notes => row[attrs_map[:notes]],
                                     :created_on => date)
 
               time_entry.save!
@@ -261,14 +264,21 @@ class TimesheetImporterController < ApplicationController
           
         rescue ArgumentError => e
           @messages << "Error row #{index + 2}: #{e.message}"
-          date == nil ? @errs[:spent_on][index] = true : nil
+          date == nil ? @errs[:update_date][index] = true : nil
           error = true
           next
         rescue ActiveRecord::RecordNotFound => e
           @messages << "Error row #{index + 2}: #{e.message}"
           error = true
-          issue == nil ? @errs[:issue_id][index] = true : nil
-          user == nil ? @errs[:user][index] = true : nil
+          user == nil ? @errs[:login][index] = true : nil
+          if user != nil
+            issue == nil ? @errs[:id][index] = true : nil
+          end
+
+          if user != nil && issue != nil
+            time_entry_activity == nil ? @errs[:activity][index] = true : nil
+          end
+
           next
         rescue RuntimeError => e
           @messages << "Error row #{index + 2}: #{e.message}"
@@ -305,6 +315,7 @@ class TimesheetImporterController < ApplicationController
     #END CSV ROW LOOP
     
     if @failed_issues.size > 0
+      logger.info "ERRORS HASH: #{@errs}"
       @handle_count = 0
       @failed_issues = @failed_issues.sort
       @headers = @failed_issues[0][1].headers
