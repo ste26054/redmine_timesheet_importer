@@ -86,7 +86,7 @@ class TimesheetImporterController < ApplicationController
       end
 
       flash[:error] = error_message
-h
+
       redirect_to importer_index_path
 
       return
@@ -184,11 +184,11 @@ h
     end
     
 
-    fields_map = {}
-    params[:fields_map].each { |k, v| fields_map[k.unpack('U*').pack('U*')] = v }
+    @fields_map = {}
+    params[:fields_map].each { |k, v| @fields_map[k.unpack('U*').pack('U*')] = v }
     
     # attrs_map is fields_map's invert
-    attrs_map = fields_map.invert
+    attrs_map = @fields_map.invert
 
     @errs = Hash.new { |hash, key| hash[key] = {} }
     # BEGIN CSV ROW LOOP
@@ -217,9 +217,6 @@ h
           date = Date.parse(row[attrs_map["update_date"]])
           issue = Issue.find_by_id!(row[attrs_map["id"]])
           
-        
-        
-
           project = Project.find_by_id!(issue.project_id)
           
           time_entry_activity = TimeEntryActivity.find_by_name!(row[attrs_map["activity"]])
@@ -229,14 +226,14 @@ h
 
           if issue != nil && user != nil
 
-            logger.info "#{index}: ISSUE ID: #{issue.id}. User: #{user} User ID: #{user.id}. ID Assigned to: #{issue.assigned_to_id}."
+            #logger.info "#{index}: ISSUE ID: #{issue.id}. User: #{user} User ID: #{user.id}. ID Assigned to: #{issue.assigned_to_id}."
             #if user.member_of?(issue.project) || user.admin?
             #  logger.info "#{index} USER HAS RIGHTS TO UPDATE ISSUE"
             #else
             #  logger.info "#{index} USER IS NOT ALLOWED TO UPDATE ISSUE"
             #end
             if issue.watched_by?(user) || user.id == issue.assigned_to_id #|| user.admin?
-              
+
               time_entry = TimeEntry.new(:issue_id => issue.id, 
                                           :spent_on => date,
                                           :activity => time_entry_activity,
@@ -263,25 +260,25 @@ h
           
           
         rescue ArgumentError => e
-          @messages << "Error row #{index}: #{e.message}"
+          @messages << "Error row #{index + 2}: #{e.message}"
           date == nil ? @errs[:spent_on][index] = true : nil
           error = true
           next
         rescue ActiveRecord::RecordNotFound => e
-          @messages << "Error row #{index}: #{e.message}"
+          @messages << "Error row #{index + 2}: #{e.message}"
           error = true
           issue == nil ? @errs[:issue_id][index] = true : nil
           user == nil ? @errs[:user][index] = true : nil
           next
         rescue RuntimeError => e
-          @messages << "Error row #{index}: #{e.message}"
+          @messages << "Error row #{index + 2}: #{e.message}"
           error = true
         rescue 
           #@messages << "Warning: The following data-validation errors occurred Row #{index} in the list below"
           
           if time_entry != nil
             time_entry.errors.each do |attr, error_message|
-              @messages << "Error row #{index}: #{attr} #{error_message}"
+              @messages << "Error row #{index + 2}: #{attr} #{error_message}"
             end
           end
 
@@ -318,14 +315,16 @@ h
           logger.info "Timesheet import Error: Time entry #{entry_id} could not be deleted."
         end
       end
-
-    end
-    
-    # Clean up after ourselves
+    else
+     # Clean up after ourselves
     iip.delete
     
     # Garbage prevention: clean up iips older than 3 days
-    TimesheetImportInProgress.delete_all(["created < ?",Time.new - 3*24*60*60])
+    TimesheetImportInProgress.delete_all(["created < ?",Time.new - 3*24*60*60])     
+
+    end
+    
+
   end
 
 private

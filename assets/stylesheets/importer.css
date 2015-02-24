@@ -9,3 +9,7 @@ text-align: right;
 width: 100px;
 display: inline-block;
 }
+
+.link-color{
+  color: "red";
+}

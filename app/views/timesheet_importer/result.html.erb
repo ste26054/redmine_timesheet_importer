@@ -5,11 +5,15 @@
 <h2><%= l(:label_import_result) %></h2>
 
 <% if @failed_count == 0 %>
-	<p><%= l(:label_result_notice, :handle_count => @handle_count, :success_count => @handle_count) %></p>
-	<p><%= l(:label_result_projects) %><br/>
+	<p>
+		<%= l(:label_result_notice, :handle_count => @handle_count, :success_count => @handle_count) %>
+	</p>
+	<p>
+		<%= l(:label_result_projects) %><br/>
 	<% @affect_projects_issues.each do |project, count|%>
-	<label class="tabular2"><%= project %>:</label><label class="tabular2"><%= l(:label_result_issues, count) %></label><br/>
-	<% end %></p>
+		<label class="tabular2"><%= project %>:</label><label class="tabular2"><%= l(:label_result_issues, count) %></label><br/>
+	<% end %>
+</p>
 
 <% else %>
 	<h3><%= l(:label_import_error) %></h3>
@@ -29,22 +33,28 @@
 <% if @failed_count > 0 %>
 	<h3><%= l(:label_result_failed, @failed_count) %></h3>
 	<table class="list">
-		<thead><tr>
+		<thead>
+			<tr>
 			<th><%= l(:label_result_row_num) %></th>
 			<% @headers.each do |column| %>
-			<th><%= column.unpack('U*').pack('U*')  %></th>
+				<th><%= column.unpack('U*').pack('U*')  %></th>
 			<% end %>
-		</tr></thead>
+			</tr>
+		</thead>
 		<tbody>
 		<% @failed_issues.each do |id, issue| -%>
-		<tr class="<%= cycle("odd", "even") %>">
-			<td><%= id %></td>
-			<% issue.each do |column| %>
-		<%- data = column[1] -%>
-		<%- data = data.unpack('U*').pack('U*') if data.is_a?(String) -%>
-			<%= content_tag 'td', data %>
-		<% end %>
-		</tr>
+			<tr class="<%= cycle("odd", "even") %>">
+				<td><%= id + 2 %></td>
+				<% issue.each do |column| %>
+					<%- data = column[1] -%>
+					<%- data = data.unpack('U*').pack('U*') if data.is_a?(String) -%>
+					<% if @errs[column][id] == true %>
+						<%= content_tag 'td', data, style: "color: red;" %>
+					<% else %>
+						<%= content_tag 'td', column %>
+					<% end %>
+				<% end %>
+			</tr>
 		<% end %>
 		</tbody>
 	</table>
