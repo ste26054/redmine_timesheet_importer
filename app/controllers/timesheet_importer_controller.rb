@@ -16,37 +16,55 @@ end
 class TimesheetImporterController < ApplicationController
   unloadable
 
-
-  TIME_ENTRY_ISSUE_ATTRS = [:id, :login, :update_date, :hours, :comment, :activity, :notes]
+  REQUIRED_ATTRS = [:id, :login, :update_date, :hours, :activity]
+  OPTIONAL_ATTRS = [:comment, :notes]
+  TIME_ENTRY_ISSUE_ATTRS = REQUIRED_ATTRS + OPTIONAL_ATTRS
   
   def index
   end
 
   def match
-    #NEW COMMENT
-    # Delete existing iip to ensure there can't be two iips for a user
-    TimesheetImportInProgress.delete_all(["user_id = ?",User.current.id])
-    # save import-in-progress data
-    iip = TimesheetImportInProgress.find_or_create_by_user_id(User.current.id)
-    iip.quote_char = params[:wrapper]
-    iip.col_sep = params[:splitter]
-    iip.encoding = params[:encoding]
-    iip.created = Time.new
+    iip = nil
+    unless params[:retry]
+      # Delete existing iip to ensure there can't be two iips for a user
+      TimesheetImportInProgress.delete_all(["user_id = ?",User.current.id])
+      # save import-in-progress data
 
-    unless params[:file]
-      flash[:error] = 'You must provide a file !'
+      iip = TimesheetImportInProgress.find_or_create_by_user_id(User.current.id)
+      iip.quote_char = params[:wrapper]
+      iip.col_sep = params[:splitter]
+      iip.encoding = params[:encoding]
+      
 
-      redirect_to importer_index_path
-      return
+      iip.created = Time.new
+
+      unless params[:file]
+        flash[:error] = 'You must provide a file !'
+
+        redirect_to timesheet_importer_index_path
+        return
+      else
+        iip.filename = params[:file].original_filename
+      end
+
+      @original_filename = params[:file].original_filename
+      iip.csv_data = params[:file].read
+      iip.save
+
+    else
+      iip = TimesheetImportInProgress.find_by_user_id(User.current.id)
+      @original_filename = iip.filename
+      if iip == nil
+        flash[:error] = "No import is currently in progress"
+        return
+      end
+      logger.info "IN RETRY, IIP: #{iip}"
     end
-
-    iip.csv_data = params[:file].read
-    iip.save
     
     # Put the timestamp in the params to detect
     # users with two imports in progress
     @import_timestamp = iip.created.strftime("%Y-%m-%d %H:%M:%S")
-    @original_filename = params[:file].original_filename
+    
     
     # display sample
     sample_count = 5
@@ -58,7 +76,7 @@ class TimesheetImporterController < ApplicationController
         flash[:error] = 'No data line in your CSV, check the encoding of the file<br/><br/>Header :<br/>'.html_safe +
           iip.csv_data
 
-        redirect_to importer_index_path
+        redirect_to timesheet_importer_index_path
 
         return
       end
@@ -87,7 +105,7 @@ class TimesheetImporterController < ApplicationController
 
       flash[:error] = error_message
 
-      redirect_to importer_index_path
+      redirect_to timesheet_importer_index_path
 
       return
     end
@@ -108,7 +126,7 @@ class TimesheetImporterController < ApplicationController
         '<br/><br/>Header :<br/>'.html_safe +
         iip.csv_data.lines.to_a[0]
 
-      redirect_to importer_index_path
+      redirect_to timesheet_importer_index_path
 
       return
     end
@@ -176,6 +194,7 @@ class TimesheetImporterController < ApplicationController
     
     # Retrieve saved import data
     iip = TimesheetImportInProgress.find_by_user_id(User.current.id)
+          logger.info "IN MATCH, IIP: #{iip}"
     if iip == nil
       flash[:error] = "No import is currently in progress"
       return
@@ -192,12 +211,22 @@ class TimesheetImporterController < ApplicationController
 
     params[:fields_map].each { |k, v| @fields_map[k.unpack('U*').pack('U*')] = v }
     
+
     # attrs_map is fields_map's invert
     attrs_map = @fields_map.invert
 
     # Convert string string hash keys to symbol
     attrs_map = Hash[attrs_map.map{ |k, v| [k.to_sym, v] }]
 
+    attrs_cmp = REQUIRED_ATTRS - attrs_map.keys
+    
+    unless attrs_cmp.empty?
+      flash[:error] = "The following columns are missing or not mapped properly: #{l_or_humanize(attrs_cmp, :prefix=>":")}"
+      redirect_to timesheet_importer_match_path(:retry => true, :iip => iip)
+      return
+    end
+
+    logger.info "ATTRS MAP IS: #{attrs_map}"
     @errs = Hash.new { |hash, key| hash[key] = {} }
     # BEGIN CSV ROW LOOP
 
@@ -206,116 +235,129 @@ class TimesheetImporterController < ApplicationController
                            :quote_char=>iip.quote_char,
                            :col_sep=>iip.col_sep}).each_with_index do |row, index|
 
-      issue = nil
-      project = nil
-      date = nil
-      time_entry = nil
-      user = nil
-      journal = nil
-      time_entry_activity = nil
+      @row_err = false
 
-      error = false
+      attrs_map.each do |k, v|
+        @col_err = false
+        case k
+        when :login
+          begin
+            @user = nil
+            @user = User.find_by_login!(row[attrs_map[:login]])
+          rescue ActiveRecord::RecordNotFound => e
+            @col_err = true
+          end
+        when :id
+          begin
+            @issue = nil
+            @issue = Issue.find_by_id!(row[attrs_map[:id]])
+          rescue ActiveRecord::RecordNotFound => e
+            @col_err = true
+          end
+        when :activity
+          begin
+            @time_entry_activity = nil
+            @time_entry_activity = TimeEntryActivity.find_by_name!(row[attrs_map[:activity]])
+          rescue ActiveRecord::RecordNotFound => e
+            @col_err = true
+          end
+        when :update_date
+          begin
+            @date = nil
+            @date = Date.parse(row[attrs_map[:update_date]])
+          rescue #ArgumentError => e
+            @col_err = true
+          end
+        when :hours
+          begin
+            @hours = nil
+            @hours = row[attrs_map[:hours]].to_f
+            if @hours < 0
+              raise ArgumentError, "Hours cannot be negative"
+            end
+          rescue ArgumentError => e
+            @col_err = true
+          end
+        else
 
-        begin
+        end
+
+        if @col_err == true
+          @row_err = true
+          if e != nil
+            @messages << "Partial error row #{index + 2}, column #{attrs_map[k]}: #{e.message}"
+          else
+            @messages << "Partial error row #{index + 2}, column #{attrs_map[k]}: unknown error"
+          end
+          @errs[k][index] = true
           
-          user = User.find_by_login!(row[attrs_map[:login]])
-          issue = Issue.find_by_id!(row[attrs_map[:id]])
-          date = Date.parse(row[attrs_map[:update_date]])
-          time_entry_activity = TimeEntryActivity.find_by_name!(row[attrs_map[:activity]])
+        end
 
-         
+      end #END ATTRS MAP CHECK
+      
 
-          if issue != nil && user != nil
-
-            project = Project.find_by_id!(issue.project_id)
-            @affect_projects_issues.has_key?(project.name) ? @affect_projects_issues[project.name] += 1 : @affect_projects_issues[project.name] = 1
-            #logger.info "#{index}: ISSUE ID: #{issue.id}. User: #{user} User ID: #{user.id}. ID Assigned to: #{issue.assigned_to_id}."
-            #if user.member_of?(issue.project) || user.admin?
-            #  logger.info "#{index} USER HAS RIGHTS TO UPDATE ISSUE"
-            #else
-            #  logger.info "#{index} USER IS NOT ALLOWED TO UPDATE ISSUE"
-            #end
-            if issue.watched_by?(user) || user.id == issue.assigned_to_id || user.admin?
-
-              time_entry = TimeEntry.new(:issue_id => issue.id, 
-                                          :spent_on => date,
-                                          :activity => time_entry_activity,
+      if @row_err == true
+        @failed_count += 1
+        @failed_issues[index] = row
+      else
+        begin
+          project = Project.find_by_id!(@issue.project_id)
+          @affect_projects_issues.has_key?(project.name) ? @affect_projects_issues[project.name] += 1 : @affect_projects_issues[project.name] = 1
+        rescue ActiveRecord::RecordNotFound => e
+          @messages << "General error row #{index + 2}: #{e.message}"
+          @failed_count += 1
+          @failed_issues[index] = row
+        end
+        begin
+          #logger.info "#{index}: ISSUE ID: #{issue.id}. User: #{user} User ID: #{user.id}. ID Assigned to: #{issue.assigned_to_id}."
+          #if user.member_of?(issue.project) || user.admin?
+          #  logger.info "#{index} USER HAS RIGHTS TO UPDATE ISSUE"
+          #else
+          #  logger.info "#{index} USER IS NOT ALLOWED TO UPDATE ISSUE"
+          #end
+          unless @issue.watched_by?(@user) || @user.id == @issue.assigned_to_id
+            @errs[:login][index] = true
+            @errs[:id][index] = true
+            raise ArgumentError, "User #{@user} is not an assignee or a watcher of the Issue #{@issue}"
+          else
+            @time_entry = TimeEntry.new(:issue_id => @issue.id, 
+                                          :spent_on => @date,
+                                          :activity => @time_entry_activity,
                                           :hours => row[attrs_map[:hours]],
                                           :comments => row[attrs_map[:comment]], 
-                                          :user => user)
+                                          :user => @user)
 
-              journal = Journal.new(:journalized => issue,
-                                    :user => user,
-                                    :notes => row[attrs_map[:notes]],
-                                    :created_on => date)
+            journal = Journal.new(:journalized => @issue,
+                                  :user => @user,
+                                  :notes => row[attrs_map[:notes]],
+                                  :created_on => @date)
 
-              time_entry.save!
-              journal.save!
-            else
-              raise "User #{user} is not an assignee or a watcher of the Issue #{issue}"
-            end
-            #if user.allowed_to?(:edit_issues, issue.project)
-            #  logger.info "#{index} USER ALLOWED TO EDIT ISSUE"
-            #end
+            @time_entry.save!
+            journal.save!
 
           end
-
-          
-          
-        rescue ArgumentError => e
-          @messages << "Error row #{index + 2}: #{e.message}"
-          date == nil ? @errs[:update_date][index] = true : nil
-          error = true
-          next
-        rescue ActiveRecord::RecordNotFound => e
-          @messages << "Error row #{index + 2}: #{e.message}"
-          error = true
-          user == nil ? @errs[:login][index] = true : nil
-          if user != nil
-            issue == nil ? @errs[:id][index] = true : nil
-          end
-
-          if user != nil && issue != nil
-            time_entry_activity == nil ? @errs[:activity][index] = true : nil
-          end
-
-          next
-        rescue RuntimeError => e
-          @messages << "Error row #{index + 2}: #{e.message}"
-          error = true
-        rescue 
-          #@messages << "Warning: The following data-validation errors occurred Row #{index} in the list below"
-          
-          if time_entry != nil
-            time_entry.errors.each do |attr, error_message|
-              @messages << "Error row #{index + 2}: #{attr} #{error_message}"
-            end
-          end
-
-          error = true
-          next
-        else
-          @time_entry_ids.push(time_entry.id)
-          @handle_count += 1
-
-        ensure
-          if error
+          #if user.allowed_to?(:edit_issues, issue.project)
+          #  logger.info "#{index} USER ALLOWED TO EDIT ISSUE"
+          #end
+         rescue ArgumentError => e
             @failed_count += 1
             @failed_issues[index] = row
-          end
+            @messages << "General error row #{index + 2}: #{e.message}"
+         rescue => e
+           @messages << "General error row #{index + 2}: #{e.message}"
+           @failed_count += 1
+           @failed_issues[index] = row
+        else
+          @time_entry_ids.push(@time_entry.id)
+          @handle_count += 1
         end
-        #unless time_entry.save
-          
-
-        #else
-
-        #end
+      end
      
     end 
     #END CSV ROW LOOP
+    logger.info "HASH ERROR CONTAINS: #{@errs}"
     
     if @failed_issues.size > 0
-      logger.info "ERRORS HASH: #{@errs}"
       @handle_count = 0
       @failed_issues = @failed_issues.sort
       @headers = @failed_issues[0][1].headers

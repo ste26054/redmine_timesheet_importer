@@ -49,7 +49,7 @@
 					<%- data = column[1] -%>
 					<%- data = data.unpack('U*').pack('U*') if data.is_a?(String) -%>
 					<% if @errs[@fields_map[column[0]].to_sym][id] == true %>
-						<%= content_tag 'td', data, style: "color: red;" %>
+						<%= content_tag 'td', data, class: "link-color" %>
 					<% else %>
 						<%= content_tag 'td', data %>
 					<% end %>
