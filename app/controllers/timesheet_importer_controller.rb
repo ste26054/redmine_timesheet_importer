@@ -58,7 +58,6 @@ class TimesheetImporterController < ApplicationController
         flash[:error] = "No import is currently in progress"
         return
       end
-      logger.info "IN RETRY, IIP: #{iip}"
     end
     
     # Put the timestamp in the params to detect
@@ -75,20 +74,24 @@ class TimesheetImporterController < ApplicationController
       if iip.csv_data.lines.to_a.size <= 1
         flash[:error] = 'No data line in your CSV, check the encoding of the file<br/><br/>Header :<br/>'.html_safe +
           iip.csv_data
-
         redirect_to timesheet_importer_index_path
-
         return
       end
 
-      CSV.new(iip.csv_data, {:headers=>true,
-                            :encoding=>iip.encoding,
-                             :quote_char=>iip.quote_char,
-                             :col_sep=>iip.col_sep}).each do |row|
-        @samples[i] = row
-        i += 1
-        if i >= sample_count
-          break
+      CSV.new(iip.csv_data, { :headers => true,
+                              :encoding => iip.encoding,
+                              :quote_char => iip.quote_char,
+                              :col_sep => iip.col_sep,
+                              :skip_blanks => true
+                            }
+                             ).each do |row|
+        #Deletes empty CSV lines not detected by the option :skip_blanks => true
+        unless row.to_s.split(iip.col_sep).delete_if {|e| e == "" or e == "\n"} == [] 
+          @samples[i] = row
+          i += 1
+          if i >= sample_count
+            break
+          end
         end
       end # do
     rescue Exception => e
@@ -139,9 +142,6 @@ class TimesheetImporterController < ApplicationController
     TIME_ENTRY_ISSUE_ATTRS.each do |attr|
       @attrs.push([l_or_humanize(attr, :prefix=>"field_"), attr])
     end
-
-    logger.info "#{@attrs}"
-
   end
   
 
@@ -233,126 +233,130 @@ class TimesheetImporterController < ApplicationController
     CSV.new(iip.csv_data, {:headers=>true,
                            :encoding=>iip.encoding,
                            :quote_char=>iip.quote_char,
-                           :col_sep=>iip.col_sep}).each_with_index do |row, index|
-
-      @row_err = false
-
-      attrs_map.each do |k, v|
-        @col_err = false
-        case k
-        when :login
-          begin
-            @user = nil
-            @user = User.find_by_login!(row[attrs_map[:login]])
-          rescue ActiveRecord::RecordNotFound => e
-            @col_err = true
-          end
-        when :id
-          begin
-            @issue = nil
-            @issue = Issue.find_by_id!(row[attrs_map[:id]])
-          rescue ActiveRecord::RecordNotFound => e
-            @col_err = true
-          end
-        when :activity
-          begin
-            @time_entry_activity = nil
-            @time_entry_activity = TimeEntryActivity.find_by_name!(row[attrs_map[:activity]])
-          rescue ActiveRecord::RecordNotFound => e
-            @col_err = true
-          end
-        when :update_date
-          begin
-            @date = nil
-            @date = Date.parse(row[attrs_map[:update_date]])
-          rescue #ArgumentError => e
-            @col_err = true
-          end
-        when :hours
-          begin
-            @hours = nil
-            @hours = row[attrs_map[:hours]].to_f
-            if @hours < 0
-              raise ArgumentError, "Hours cannot be negative"
-            end
-          rescue ArgumentError => e
-            @col_err = true
-          end
-        else
-
-        end
-
-        if @col_err == true
-          @row_err = true
-          if e != nil
-            @messages << "Partial error row #{index + 2}, column #{attrs_map[k]}: #{e.message}"
-          else
-            @messages << "Partial error row #{index + 2}, column #{attrs_map[k]}: unknown error"
-          end
-          @errs[k][index] = true
-          
-        end
-
-      end #END ATTRS MAP CHECK
+                           :col_sep=>iip.col_sep,
+                           :skip_blanks => true}).each_with_index do |row, index|
       
+      unless row.to_s.split(iip.col_sep).delete_if {|e| e == "" or e == "\n"} == []
 
-      if @row_err == true
-        @failed_count += 1
-        @failed_issues[index] = row
-      else
-        begin
-          project = Project.find_by_id!(@issue.project_id)
-          @affect_projects_issues.has_key?(project.name) ? @affect_projects_issues[project.name] += 1 : @affect_projects_issues[project.name] = 1
-        rescue ActiveRecord::RecordNotFound => e
-          @messages << "General error row #{index + 2}: #{e.message}"
+        logger.info "IN CSV ROW: #{row}"
+        @row_err = false
+
+        attrs_map.each do |k, v|
+          @col_err = false
+          case k
+          when :login
+            begin
+              @user = nil
+              @user = User.find_by_login!(row[attrs_map[:login]])
+            rescue ActiveRecord::RecordNotFound => e
+              @col_err = true
+            end
+          when :id
+            begin
+              @issue = nil
+              @issue = Issue.find_by_id!(row[attrs_map[:id]])
+            rescue ActiveRecord::RecordNotFound => e
+              @col_err = true
+            end
+          when :activity
+            begin
+              @time_entry_activity = nil
+              @time_entry_activity = TimeEntryActivity.find_by_name!(row[attrs_map[:activity]])
+            rescue ActiveRecord::RecordNotFound => e
+              @col_err = true
+            end
+          when :update_date
+            begin
+              @date = nil
+              @date = Date.parse(row[attrs_map[:update_date]])
+            rescue #ArgumentError => e
+              @col_err = true
+            end
+          when :hours
+            begin
+              @hours = nil
+              @hours = row[attrs_map[:hours]].to_f
+              if @hours < 0
+                raise ArgumentError, "Hours cannot be negative"
+              end
+            rescue ArgumentError => e
+              @col_err = true
+            end
+          else
+
+          end
+
+          if @col_err == true
+            @row_err = true
+            if e != nil
+              @messages << "Partial error row #{index + 2}, column #{attrs_map[k]}: #{e.message}"
+            else
+              @messages << "Partial error row #{index + 2}, column #{attrs_map[k]}: unknown error"
+            end
+            @errs[k][index] = true
+            
+          end
+
+        end #END ATTRS MAP CHECK
+        
+
+        if @row_err == true
           @failed_count += 1
           @failed_issues[index] = row
-        end
-        begin
-          #logger.info "#{index}: ISSUE ID: #{issue.id}. User: #{user} User ID: #{user.id}. ID Assigned to: #{issue.assigned_to_id}."
-          #if user.member_of?(issue.project) || user.admin?
-          #  logger.info "#{index} USER HAS RIGHTS TO UPDATE ISSUE"
-          #else
-          #  logger.info "#{index} USER IS NOT ALLOWED TO UPDATE ISSUE"
-          #end
-          unless @issue.watched_by?(@user) || @user.id == @issue.assigned_to_id
-            @errs[:login][index] = true
-            @errs[:id][index] = true
-            raise ArgumentError, "User #{@user} is not an assignee or a watcher of the Issue #{@issue}"
-          else
-            @time_entry = TimeEntry.new(:issue_id => @issue.id, 
-                                          :spent_on => @date,
-                                          :activity => @time_entry_activity,
-                                          :hours => row[attrs_map[:hours]],
-                                          :comments => row[attrs_map[:comment]], 
-                                          :user => @user)
-
-            journal = Journal.new(:journalized => @issue,
-                                  :user => @user,
-                                  :notes => row[attrs_map[:notes]],
-                                  :created_on => @date)
-
-            @time_entry.save!
-            journal.save!
-
-          end
-          #if user.allowed_to?(:edit_issues, issue.project)
-          #  logger.info "#{index} USER ALLOWED TO EDIT ISSUE"
-          #end
-         rescue ArgumentError => e
+        else
+          begin
+            project = Project.find_by_id!(@issue.project_id)
+            @affect_projects_issues.has_key?(project.name) ? @affect_projects_issues[project.name] += 1 : @affect_projects_issues[project.name] = 1
+          rescue ActiveRecord::RecordNotFound => e
+            @messages << "General error row #{index + 2}: #{e.message}"
             @failed_count += 1
             @failed_issues[index] = row
-            @messages << "General error row #{index + 2}: #{e.message}"
-         rescue => e
-           @messages << "General error row #{index + 2}: #{e.message}"
-           @failed_count += 1
-           @failed_issues[index] = row
-        else
-          @time_entry_ids.push(@time_entry.id)
-          @handle_count += 1
+          end
+          begin
+            #logger.info "#{index}: ISSUE ID: #{issue.id}. User: #{user} User ID: #{user.id}. ID Assigned to: #{issue.assigned_to_id}."
+            #if user.member_of?(issue.project) || user.admin?
+            #  logger.info "#{index} USER HAS RIGHTS TO UPDATE ISSUE"
+            #else
+            #  logger.info "#{index} USER IS NOT ALLOWED TO UPDATE ISSUE"
+            #end
+            unless @issue.watched_by?(@user) || @user.id == @issue.assigned_to_id
+              @errs[:login][index] = true
+              @errs[:id][index] = true
+              raise ArgumentError, "User #{@user} is not an assignee or a watcher of the Issue #{@issue}"
+            else
+              @time_entry = TimeEntry.new(:issue_id => @issue.id, 
+                                            :spent_on => @date,
+                                            :activity => @time_entry_activity,
+                                            :hours => row[attrs_map[:hours]],
+                                            :comments => row[attrs_map[:comment]], 
+                                            :user => @user)
+
+              journal = Journal.new(:journalized => @issue,
+                                    :user => @user,
+                                    :notes => row[attrs_map[:notes]],
+                                    :created_on => @date)
+
+              @time_entry.save!
+              journal.save!
+
+            end
+            #if user.allowed_to?(:edit_issues, issue.project)
+            #  logger.info "#{index} USER ALLOWED TO EDIT ISSUE"
+            #end
+           rescue ArgumentError => e
+              @failed_count += 1
+              @failed_issues[index] = row
+              @messages << "General error row #{index + 2}: #{e.message}"
+           rescue => e
+             @messages << "General error row #{index + 2}: #{e.message}"
+             @failed_count += 1
+             @failed_issues[index] = row
+          else
+            @time_entry_ids.push(@time_entry.id)
+            @handle_count += 1
+          end
         end
       end
-     
     end 
     #END CSV ROW LOOP
     logger.info "HASH ERROR CONTAINS: #{@errs}"
