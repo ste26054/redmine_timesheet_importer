@@ -24,94 +24,119 @@ class TimesheetImporterController < ApplicationController
   end
 
   def match
-    iip = nil
+    iip = []
     unless params[:retry]
       # Delete existing iip to ensure there can't be two iips for a user
       TimesheetImportInProgress.delete_all(["user_id = ?",User.current.id])
       # save import-in-progress data
 
-      iip = TimesheetImportInProgress.find_or_create_by_user_id(User.current.id)
-      iip.quote_char = params[:wrapper]
-      iip.col_sep = params[:splitter]
-      iip.encoding = params[:encoding]
-      
-
-      iip.created = Time.new
-
-      unless params[:file]
-        flash[:error] = 'You must provide a file !'
-
+      if params[:files] == nil
+        flash[:error] = 'You must provide at least a file !'
         redirect_to timesheet_importer_index_path
         return
-      else
-        iip.filename = params[:file].original_filename
       end
 
-      @original_filename = params[:file].original_filename
-      iip.csv_data = params[:file].read
-      iip.save
+      params[:files].each_with_index do |file, i|
+        unless file.content_type == "text/csv" || file.content_type == "application/vnd.ms-excel"
+          flash[:error] = "Only CSV files are accepted. Detected: #{file.content_type}"
+          redirect_to timesheet_importer_index_path
+          return
+        end
+        iip[i] = TimesheetImportInProgress.new(:user_id => User.current.id)
+        iip[i].quote_char = params[:wrapper]
+        iip[i].col_sep = params[:splitter]
+        iip[i].encoding = params[:encoding]
+        iip[i].created = Time.new
+        iip[i].filename = file.original_filename
+        iip[i].csv_data = file.read
+        iip[i].save
+      end 
+
+      # @original_filename = params[:files][0].original_filename
+      @original_filename = params[:files].map { |r| r.original_filename }
 
     else
       iip = TimesheetImportInProgress.find_by_user_id(User.current.id)
-      @original_filename = iip.filename
+      @original_filename = iip.map { |r| r.original_filename }
       if iip == nil
         flash[:error] = "No import is currently in progress"
         return
       end
     end
+
+    
+    @original_filename = @original_filename.join("; ")
     
     # Put the timestamp in the params to detect
     # users with two imports in progress
-    @import_timestamp = iip.created.strftime("%Y-%m-%d %H:%M:%S")
+    @import_timestamp = iip[0].created.strftime("%Y-%m-%d %H:%M:%S")
     
-    
+    #Check files headers
+    hdrs = []
+    iip.each_with_index do |entry|
+      hdrs.push(CSV.new(entry.csv_data, { :headers => true,
+                                :encoding => entry.encoding,
+                                :quote_char => entry.quote_char,
+                                :col_sep => entry.col_sep,
+                                :skip_blanks => true
+                              })[0].headers)
+    end
+    logger.info "HDRS: #{hdrs}"
+    unless hdrs.uniq.length == 1
+      flash[:error] = "The files provided have different headers."
+      redirect_to timesheet_importer_index_path
+      return
+    end
+
+
     # display sample
     sample_count = 5
     i = 0
     @samples = []
     
-    begin
-      if iip.csv_data.lines.to_a.size <= 1
-        flash[:error] = 'No data line in your CSV, check the encoding of the file<br/><br/>Header :<br/>'.html_safe +
-          iip.csv_data
+
+      begin
+        if iip.csv_data.lines.to_a.size <= 1
+          flash[:error] = 'No data line in your CSV, check the encoding of the file<br/><br/>Header :<br/>'.html_safe +
+            iip.csv_data
+          redirect_to timesheet_importer_index_path
+          return
+        end
+
+        CSV.new(iip.csv_data, { :headers => true,
+                                :encoding => iip.encoding,
+                                :quote_char => iip.quote_char,
+                                :col_sep => iip.col_sep,
+                                :skip_blanks => true
+                              }
+                               ).each do |row|
+          #Deletes empty CSV lines not detected by the option :skip_blanks => true
+          unless row.to_s.split(iip.col_sep).delete_if {|e| e == "" or e == "\n"} == [] 
+            @samples[i] = row
+            i += 1
+            if i >= sample_count
+              break
+            end
+          end
+        end # do
+      rescue Exception => e
+        csv_data_lines = iip.csv_data.lines.to_a
+
+        error_message = e.message +
+          '<br/><br/>Header :<br/>'.html_safe +
+          csv_data_lines[0]
+
+        if csv_data_lines.size > 0
+          error_message += '<br/><br/>Error on header or line :<br/>'.html_safe +
+            csv_data_lines[@samples.size + 1]
+        end
+
+        flash[:error] = error_message
+
         redirect_to timesheet_importer_index_path
+
         return
       end
-
-      CSV.new(iip.csv_data, { :headers => true,
-                              :encoding => iip.encoding,
-                              :quote_char => iip.quote_char,
-                              :col_sep => iip.col_sep,
-                              :skip_blanks => true
-                            }
-                             ).each do |row|
-        #Deletes empty CSV lines not detected by the option :skip_blanks => true
-        unless row.to_s.split(iip.col_sep).delete_if {|e| e == "" or e == "\n"} == [] 
-          @samples[i] = row
-          i += 1
-          if i >= sample_count
-            break
-          end
-        end
-      end # do
-    rescue Exception => e
-      csv_data_lines = iip.csv_data.lines.to_a
-
-      error_message = e.message +
-        '<br/><br/>Header :<br/>'.html_safe +
-        csv_data_lines[0]
-
-      if csv_data_lines.size > 0
-        error_message += '<br/><br/>Error on header or line :<br/>'.html_safe +
-          csv_data_lines[@samples.size + 1]
-      end
-
-      flash[:error] = error_message
-
-      redirect_to timesheet_importer_index_path
-
-      return
-    end
 
     if @samples.size > 0
       @headers = @samples[0].headers
