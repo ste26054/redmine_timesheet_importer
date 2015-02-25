@@ -11,6 +11,7 @@ display: inline-block;
 }
 
 .link-color{
-  color: red;
+  /*color: red;*/
   font-weight: bold;
+  background-color: red;
 }

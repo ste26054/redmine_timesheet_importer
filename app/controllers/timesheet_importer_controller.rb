@@ -269,7 +269,7 @@ class TimesheetImporterController < ApplicationController
             begin
               @date = nil
               @date = Date.parse(row[attrs_map[:update_date]])
-            rescue #ArgumentError => e
+            rescue  => e
               @col_err = true
             end
           when :hours
@@ -359,7 +359,6 @@ class TimesheetImporterController < ApplicationController
       end
     end 
     #END CSV ROW LOOP
-    logger.info "HASH ERROR CONTAINS: #{@errs}"
     
     if @failed_issues.size > 0
       @handle_count = 0
