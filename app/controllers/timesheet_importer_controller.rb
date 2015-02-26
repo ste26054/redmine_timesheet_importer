@@ -68,23 +68,18 @@ class TimesheetImporterController < ApplicationController
       end
     end
 
-    # Save CSV file to database in TimesheetImportInProgress
-    iip = TimesheetImportInProgress.new(:user_id => User.current.id)
-    iip.quote_char = quote_char
-    iip.col_sep = col_sep
-    iip.encoding = encoding
-    iip.created = Time.new
-    iip.filename = options[:filename]
-    iip.csv_data = final_csv
-    iip.save
-
-    @original_filename = params[:files].map { |r| r.original_filename }
-    @original_filename = @original_filename.join("; ")
-    # Use this db entry for further operations
+    # Return CSV embedded object
+    out_csv = nil
+    out_csv.created = Time.new
+    out_csv.csv_data = final_csv
+    out_csv.filename = csv_files.map { |r| r.filename }
+    out_csv.filename = iip.filename.join("; ")
+    
+    return out_csv
   end
 
   def match
-    iip = []
+    iip = nil
     
     unless params[:retry]
       # Delete existing iip to ensure there can't be two iips for a user
@@ -96,58 +91,28 @@ class TimesheetImporterController < ApplicationController
         redirect_to timesheet_importer_index_path
         return
       end
+        iip = TimesheetImportInProgress.new(:user_id => User.current.id)
+        iip.quote_char = params[:wrapper]
+        iip.col_sep = params[:splitter]
+        iip.encoding = params[:encoding]
 
-      params[:files].each_with_index do |file, i|
-        unless file.content_type == "text/csv" || file.content_type == "application/vnd.ms-excel"
-          flash[:error] = "Only CSV files are accepted. Detected: #{file.content_type}"
-          redirect_to timesheet_importer_index_path
-          return
-        end
-        iip[i] = TimesheetImportInProgress.new(:user_id => User.current.id)
-        iip[i].quote_char = params[:wrapper]
-        iip[i].col_sep = params[:splitter]
-        iip[i].encoding = params[:encoding]
-        iip[i].created = Time.new
-        iip[i].filename = file.original_filename
-        iip[i].csv_data = file.read
-        iip[i].save
-      end 
-
-      # @original_filename = params[:files][0].original_filename
-      @original_filename = params[:files].map { |r| r.original_filename }
-
+        processed_file = merge_files_to_csv(params[:files],{:wrapper => iip.quote_char,
+                                                            :splitter => iip.col_sep,
+                                                            :encoding => iip.encoding})
+        iip.created = processed_file.created
+        iip.filename = processed_file.filename
+        iip.csv_data = processed_file.csv_data
+        iip.save
     else
       iip = TimesheetImportInProgress.find_by_user_id(User.current.id)
-      @original_filename = iip.map { |r| r.original_filename }
       if iip == nil
         flash[:error] = "No import is currently in progress"
         return
       end
     end
-
-    
-    @original_filename = @original_filename.join("; ")
-    
     # Put the timestamp in the params to detect
     # users with two imports in progress
-    @import_timestamp = iip[0].created.strftime("%Y-%m-%d %H:%M:%S")
-    
-    #Check files headers
-    hdrs = []
-    iip.each_with_index do |entry|
-      hdrs.push(CSV.new(entry.csv_data, { :headers => true,
-                                :encoding => entry.encoding,
-                                :quote_char => entry.quote_char,
-                                :col_sep => entry.col_sep,
-                                :skip_blanks => true
-                              })[0].headers)
-    end
-    logger.info "HDRS: #{hdrs}"
-    unless hdrs.uniq.length == 1
-      flash[:error] = "The files provided have different headers. Please provide files with exactly the same headers order & syntax to ensure a correct import"
-      redirect_to timesheet_importer_index_path
-      return
-    end
+    @import_timestamp = iip.created.strftime("%Y-%m-%d %H:%M:%S")
 
 
     # display sample
