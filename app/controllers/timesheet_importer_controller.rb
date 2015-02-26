@@ -23,8 +23,69 @@ class TimesheetImporterController < ApplicationController
   def index
   end
 
+  def merge_files_to_csv(files, options)
+    quote_char = options[:wrapper]
+    col_sep = options[:splitter]
+    encoding = options[:encoding]
+
+    # Read all binary files input in params[:files]
+    csv_files = []
+    hdrs = []
+    files.each_with_index do |file, i|
+      unless file.content_type == "text/csv" || file.content_type == "application/vnd.ms-excel"
+        raise ArgumentError "Only CSV files are accepted. Detected: #{file.content_type}"
+        return
+      end
+      csv_files[i].created = Time.new
+      csv_files[i].filename = file.original_filename
+      #csv_files[i].csv_raw = file.read
+
+      # Put each in new CSV object
+      csv_files[i].csv_obj = CSV.new(file.read, { :headers => true,
+                                :encoding => encoding,
+                                :quote_char => quote_char,
+                                :col_sep => col_sep,
+                                :skip_blanks => true
+                              })
+
+      # Compare headers for each files, make sure they are the same
+      # Pushing each header array into hdrs array
+      hdrs.push(csv_files[i].csv_obj[0].headers)
+      # Trick to detect non different array of headers
+      unless hdrs.uniq.length == 1
+        raise ArgumentError "The files provided have different headers. Please provide files with exactly the same headers order & syntax to ensure a correct import"
+        return
+      end
+    end
+    # Create new big CSV file with content of the first file
+    final_csv = csv_files[0].csv_obj
+
+    # Start a loop with the second file
+    csv_files.drop(1).each do |file|
+      file.csv_obj.each do |row|
+        # Append each row of the other files to big CSV
+        final_csv << row
+      end
+    end
+
+    # Save CSV file to database in TimesheetImportInProgress
+    iip = TimesheetImportInProgress.new(:user_id => User.current.id)
+    iip.quote_char = quote_char
+    iip.col_sep = col_sep
+    iip.encoding = encoding
+    iip.created = Time.new
+    iip.filename = options[:filename]
+    iip.csv_data = final_csv
+    iip.save
+
+    @original_filename = params[:files].map { |r| r.original_filename }
+    @original_filename = @original_filename.join("; ")
+    # Use this db entry for further operations
+  end
+
   def match
     iip = []
+    
     unless params[:retry]
       # Delete existing iip to ensure there can't be two iips for a user
       TimesheetImportInProgress.delete_all(["user_id = ?",User.current.id])
@@ -83,7 +144,7 @@ class TimesheetImporterController < ApplicationController
     end
     logger.info "HDRS: #{hdrs}"
     unless hdrs.uniq.length == 1
-      flash[:error] = "The files provided have different headers."
+      flash[:error] = "The files provided have different headers. Please provide files with exactly the same headers order & syntax to ensure a correct import"
       redirect_to timesheet_importer_index_path
       return
     end
@@ -415,6 +476,8 @@ private
     flash[type] ||= ""
     flash[type] += "#{text}<br/>"
   end
+
+  
 
   
 end
