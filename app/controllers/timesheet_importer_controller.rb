@@ -96,9 +96,15 @@ class TimesheetImporterController < ApplicationController
         iip.col_sep = params[:splitter]
         iip.encoding = params[:encoding]
 
-        processed_file = merge_files_to_csv(params[:files],{:wrapper => iip.quote_char,
-                                                            :splitter => iip.col_sep,
-                                                            :encoding => iip.encoding})
+        begin
+          processed_file = merge_files_to_csv(params[:files],{:wrapper => iip.quote_char,
+                                                              :splitter => iip.col_sep,
+                                                              :encoding => iip.encoding})
+        rescue ArgumentError
+          redirect_to timesheet_importer_index_path
+          return
+        end
+
         iip.created = processed_file.created
         iip.filename = processed_file.filename
         iip.csv_data = processed_file.csv_data
@@ -160,7 +166,6 @@ class TimesheetImporterController < ApplicationController
         flash[:error] = error_message
 
         redirect_to timesheet_importer_index_path
-
         return
       end
 
