@@ -23,58 +23,94 @@ class TimesheetImporterController < ApplicationController
   def index
   end
 
+  class CsvFile
+    attr_accessor :created, :filename, :csv_data
+    def initialize
+      @created = @filename = @csv_data = nil
+    end
+  end
+
   def merge_files_to_csv(files, options)
     quote_char = options[:wrapper]
     col_sep = options[:splitter]
     encoding = options[:encoding]
 
     # Read all binary files input in params[:files]
-    csv_files = []
+    # csv_files = []
     hdrs = []
-    files.each_with_index do |file, i|
-      unless file.content_type == "text/csv" || file.content_type == "application/vnd.ms-excel"
-        raise ArgumentError "Only CSV files are accepted. Detected: #{file.content_type}"
-        return
-      end
-      csv_files[i].created = Time.new
-      csv_files[i].filename = file.original_filename
-      #csv_files[i].csv_raw = file.read
 
-      # Put each in new CSV object
-      csv_files[i].csv_obj = CSV.new(file.read, { :headers => true,
-                                :encoding => encoding,
-                                :quote_char => quote_char,
-                                :col_sep => col_sep,
-                                :skip_blanks => true
-                              })
+    headers_in_file = false
 
-      # Compare headers for each files, make sure they are the same
-      # Pushing each header array into hdrs array
-      hdrs.push(csv_files[i].csv_obj[0].headers)
-      # Trick to detect non different array of headers
-      unless hdrs.uniq.length == 1
-        raise ArgumentError "The files provided have different headers. Please provide files with exactly the same headers order & syntax to ensure a correct import"
-        return
+    csv_final = CSV.generate({ :headers => true,
+                                  :encoding => encoding,
+                                  :quote_char => quote_char,
+                                  :col_sep => col_sep,
+                                  :skip_blanks => true
+                                }) do |csv|
+        logger.info "IN BIG CSV LOOP"
+      files.each_with_index do |file, i|
+        unless file.content_type == "text/csv" || file.content_type == "application/vnd.ms-excel"
+          raise ArgumentError "Only CSV files are accepted. Detected: #{file.content_type}"
+          return
+        end
+        # csv_file = CsvFile.new
+        # csv_file.created = Time.new
+        # csv_file.filename = file.original_filename
+        #csv_files[i].csv_raw = file.read
+
+        # Put each in new CSV object
+        csv_data = CSV.new(file.read, { :headers => true,
+                                  # :encoding => encoding,
+                                  :quote_char => quote_char,
+                                  :col_sep => col_sep,
+                                  :skip_blanks => true
+                                }).each do |row|
+          logger.info "LOOP: #{i} ADDED ROW: #{row}"
+
+          if headers_in_file == false
+            csv << row.headers
+            headers_in_file = true
+          end
+
+          csv << row
+          hdrs[i] = row.headers
+        end
+
+        logger.info "AFTER CSV READ"
+        # csv_file.csv_data = csv_data
+
+        # Compare headers for each files, make sure they are the same
+        # Pushing each header array into hdrs array
+        logger.info "IN MERGE CSVs. LOOP INDEX: #{i}"
+        #logger.info "IN MERGE CSVs: CURRENT HEADERS: #{csv_data.to_a[0].headers}"
+        logger.info "IN MERGE CSVs. AFTER LOG 1"
+        # csv_data.read
+        # hdrs << csv_data.headers
+        logger.info "IN MERGE CSVs. AFTER LOG 2 PUSH. HEADERS: #{hdrs.last}"
+
+        # csv_files << csv_file
+        # Trick to detect non different array of headers
+        unless hdrs.uniq.length == 1
+          raise ArgumentError, "The files provided have different headers. Please provide files with exactly the same headers order & syntax to ensure a correct import"
+          return
+        end
+
+
       end
+
+      logger.info "FINISHED CHECKING HEADERS"
+
     end
-    # Create new big CSV file with content of the first file
-    final_csv = csv_files[0].csv_obj
+    #END CSV LOOP
 
-    # Start a loop with the second file
-    csv_files.drop(1).each do |file|
-      file.csv_obj.each do |row|
-        # Append each row of the other files to big CSV
-        final_csv << row
-      end
-    end
 
     # Return CSV embedded object
-    out_csv = nil
+    out_csv = CsvFile.new
     out_csv.created = Time.new
-    out_csv.csv_data = final_csv
-    out_csv.filename = csv_files.map { |r| r.filename }
-    out_csv.filename = iip.filename.join("; ")
-    
+    out_csv.csv_data = csv_final
+    # out_csv.filename = csv_files.map { |r| r.filename }
+    # out_csv.filename = out_csv.filename.join("; ")
+    out_csv.filename = "merged"
     return out_csv
   end
 
@@ -100,7 +136,8 @@ class TimesheetImporterController < ApplicationController
           processed_file = merge_files_to_csv(params[:files],{:wrapper => iip.quote_char,
                                                               :splitter => iip.col_sep,
                                                               :encoding => iip.encoding})
-        rescue ArgumentError
+        rescue ArgumentError => e
+          flash[:error] = e.message
           redirect_to timesheet_importer_index_path
           return
         end
@@ -116,6 +153,8 @@ class TimesheetImporterController < ApplicationController
         return
       end
     end
+
+    @original_filename = iip.filename
     # Put the timestamp in the params to detect
     # users with two imports in progress
     @import_timestamp = iip.created.strftime("%Y-%m-%d %H:%M:%S")
