@@ -47,7 +47,6 @@ class TimesheetImporterController < ApplicationController
                                   :col_sep => col_sep,
                                   :skip_blanks => true
                                 }) do |csv|
-        logger.info "IN BIG CSV LOOP"
       files.each_with_index do |file, i|
         unless file.content_type == "text/csv" || file.content_type == "application/vnd.ms-excel"
           raise ArgumentError "Only CSV files are accepted. Detected: #{file.content_type}"
@@ -64,31 +63,21 @@ class TimesheetImporterController < ApplicationController
                                   :quote_char => quote_char,
                                   :col_sep => col_sep,
                                   :skip_blanks => true
-                                }).each do |row|
-          logger.info "LOOP: #{i} ADDED ROW: #{row}"
+                                }).each_with_index do |row, j|
 
           if headers_in_file == false
-            csv << row.headers
+            r = row.headers + ["filename","line"]
+            csv << r
             headers_in_file = true
           end
-
+          row["filename"] = file.original_filename
+          row["line"] = j + 2
           csv << row
+
           hdrs[i] = row.headers
         end
 
-        logger.info "AFTER CSV READ"
-        # csv_file.csv_data = csv_data
-
-        # Compare headers for each files, make sure they are the same
-        # Pushing each header array into hdrs array
-        logger.info "IN MERGE CSVs. LOOP INDEX: #{i}"
-        #logger.info "IN MERGE CSVs: CURRENT HEADERS: #{csv_data.to_a[0].headers}"
-        logger.info "IN MERGE CSVs. AFTER LOG 1"
-        # csv_data.read
-        # hdrs << csv_data.headers
-        logger.info "IN MERGE CSVs. AFTER LOG 2 PUSH. HEADERS: #{hdrs.last}"
-
-        # csv_files << csv_file
+        
         # Trick to detect non different array of headers
         unless hdrs.uniq.length == 1
           raise ArgumentError, "The files provided have different headers. Please provide files with exactly the same headers order & syntax to ensure a correct import"
@@ -97,8 +86,6 @@ class TimesheetImporterController < ApplicationController
 
 
       end
-
-      logger.info "FINISHED CHECKING HEADERS"
 
     end
     #END CSV LOOP
@@ -110,7 +97,7 @@ class TimesheetImporterController < ApplicationController
     out_csv.csv_data = csv_final
     # out_csv.filename = csv_files.map { |r| r.filename }
     # out_csv.filename = out_csv.filename.join("; ")
-    out_csv.filename = "merged"
+    out_csv.filename = "merged_csv"
     return out_csv
   end
 
@@ -300,7 +287,7 @@ class TimesheetImporterController < ApplicationController
           "This import cannot be completed"
       return
     end
-    
+        
 
     @fields_map = {}
 
@@ -323,6 +310,10 @@ class TimesheetImporterController < ApplicationController
 
     logger.info "ATTRS MAP IS: #{attrs_map}"
     @errs = Hash.new { |hash, key| hash[key] = {} }
+
+    @tracker_non_productive = Tracker.find_by_name!("NonProductive")
+
+
     # BEGIN CSV ROW LOOP
 
     CSV.new(iip.csv_data, {:headers=>true,
@@ -333,7 +324,6 @@ class TimesheetImporterController < ApplicationController
       
       unless row.to_s.split(iip.col_sep).delete_if {|e| e == "" or e == "\n"} == []
 
-        logger.info "IN CSV ROW: #{row}"
         @row_err = false
 
         attrs_map.each do |k, v|
@@ -414,25 +404,29 @@ class TimesheetImporterController < ApplicationController
             #else
             #  logger.info "#{index} USER IS NOT ALLOWED TO UPDATE ISSUE"
             #end
-            unless @issue.watched_by?(@user) || @user.id == @issue.assigned_to_id
-              @errs[:login][index] = true
-              @errs[:id][index] = true
-              raise ArgumentError, "User #{@user} is not an assignee or a watcher of the Issue #{@issue}"
+            unless @issue.watched_by?(@user) || @user.id == @issue.assigned_to_id || (@tracker_non_productive.id == @issue.tracker.id && @user.member_of?(@issue.project))
+              unless @tracker_non_productive.id == @issue.tracker.id && row[attrs_map[:hours]] == nil
+                @errs[:login][index] = true
+                @errs[:id][index] = true
+                raise ArgumentError, "User #{@user} is not allowed to log time on issue #{@issue}"
+              end
             else
-              @time_entry = TimeEntry.new(:issue_id => @issue.id, 
-                                            :spent_on => @date,
-                                            :activity => @time_entry_activity,
-                                            :hours => row[attrs_map[:hours]],
-                                            :comments => row[attrs_map[:comment]], 
-                                            :user => @user)
+              unless @tracker_non_productive.id == @issue.tracker.id && row[attrs_map[:hours]] == nil
+                @time_entry = TimeEntry.new(:issue_id => @issue.id, 
+                                              :spent_on => @date,
+                                              :activity => @time_entry_activity,
+                                              :hours => row[attrs_map[:hours]],
+                                              :comments => row[attrs_map[:comment]], 
+                                              :user => @user)
 
-              journal = Journal.new(:journalized => @issue,
-                                    :user => @user,
-                                    :notes => row[attrs_map[:notes]],
-                                    :created_on => @date)
+                journal = Journal.new(:journalized => @issue,
+                                      :user => @user,
+                                      :notes => row[attrs_map[:notes]],
+                                      :created_on => @date)
 
-              @time_entry.save!
-              journal.save!
+                @time_entry.save!
+                journal.save!
+              end
 
             end
             #if user.allowed_to?(:edit_issues, issue.project)
@@ -447,8 +441,10 @@ class TimesheetImporterController < ApplicationController
              @failed_count += 1
              @failed_issues[index] = row
           else
-            @time_entry_ids.push(@time_entry.id)
-            @handle_count += 1
+            unless @tracker_non_productive.id == @issue.tracker.id && row[attrs_map[:hours]] == nil
+              @time_entry_ids.push(@time_entry.id)
+              @handle_count += 1
+            end
           end
         end
       end
