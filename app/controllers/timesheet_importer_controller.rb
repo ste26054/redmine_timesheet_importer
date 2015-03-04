@@ -66,12 +66,12 @@ class TimesheetImporterController < ApplicationController
                                 }).each_with_index do |row, j|
 
           if headers_in_file == false
-            r = row.headers + ["filename","line"]
+            r = row.headers + ["File Name","File Line No"]
             csv << r
             headers_in_file = true
           end
-          row["filename"] = file.original_filename
-          row["line"] = j + 2
+          row["File Name"] = file.original_filename
+          row["File Line No"] = j + 2
           csv << row
 
           hdrs[i] = row.headers
