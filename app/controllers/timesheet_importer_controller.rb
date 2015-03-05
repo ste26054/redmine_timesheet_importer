@@ -21,6 +21,9 @@ class TimesheetImporterController < ApplicationController
   TIME_ENTRY_ISSUE_ATTRS = REQUIRED_ATTRS + OPTIONAL_ATTRS
   
   def index
+    unless User.current.allowed_to?(:timesheet_import, nil, {:global => :true})
+      render_403 and return
+    end
   end
 
   class CsvFile
