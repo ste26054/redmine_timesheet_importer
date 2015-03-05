@@ -52,7 +52,7 @@ class TimesheetImporterController < ApplicationController
                                 }) do |csv|
       files.each_with_index do |file, i|
         unless file.content_type == "text/csv" || file.content_type == "application/vnd.ms-excel"
-          raise ArgumentError "Only CSV files are accepted. Detected: #{file.content_type}"
+          raise ArgumentError, "Only CSV files are accepted. Detected: #{file.content_type}"
           return
         end
         # csv_file = CsvFile.new
