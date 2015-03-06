@@ -1,7 +1,7 @@
 en:
   label_import_timesheet: "Import Timesheet"
   label_timesheet_importer: "Timesheet Importer"
-  label_upload_notice: "Select a CSV file to import. Import file must have a header row. Maximum size 4MB."
+  label_upload_notice: "Select one or several CSV file(s) to import. To select multiple files, hold CTRL or MAJ. Imported file(s) must have a header row. Maximum size 4MB. In case of multiple files, all must have the exact same header"
   label_upload_format: "File format settings"
   label_upload_encoding: "Encoding:"
   label_upload_splitter: "Field separator character:"
