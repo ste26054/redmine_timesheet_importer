@@ -407,7 +407,7 @@ class TimesheetImporterController < ApplicationController
             #else
             #  logger.info "#{index} USER IS NOT ALLOWED TO UPDATE ISSUE"
             #end
-            unless @issue.watched_by?(@user) || @user.id == @issue.assigned_to_id || (@tracker_non_productive.id == @issue.tracker.id && @user.member_of?(@issue.project))
+            unless @issue.watched_by?(@user) || @user.id == @issue.assigned_to_id || (@tracker_non_productive.id == @issue.tracker.id && @user.member_of?(@issue.project)) || @user.allowed_to?(:timesheet_import, nil, {:global => :true})
               unless @tracker_non_productive.id == @issue.tracker.id && row[attrs_map[:hours]] == nil
                 @errs[:login][index] = true
                 @errs[:id][index] = true
