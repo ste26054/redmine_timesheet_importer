@@ -3,7 +3,7 @@ class TimesheetImportInProgress < ActiveRecord::Base
   unloadable
   belongs_to :user
   #belongs_to :project
-  
+  #validates_presence_of :user
   before_save :encode_csv_data
   
   private

@@ -15,7 +15,6 @@ end
 
 class TimesheetImporterController < ApplicationController
   unloadable
-
   REQUIRED_ATTRS = [:id, :login, :update_date, :hours, :activity]
   OPTIONAL_ATTRS = [:comment, :notes]
   TIME_ENTRY_ISSUE_ATTRS = REQUIRED_ATTRS + OPTIONAL_ATTRS
@@ -106,7 +105,7 @@ class TimesheetImporterController < ApplicationController
 
   def match
     iip = nil
-    
+
     unless params[:retry]
       # Delete existing iip to ensure there can't be two iips for a user
       TimesheetImportInProgress.delete_all(["user_id = ?",User.current.id])
@@ -117,7 +116,8 @@ class TimesheetImporterController < ApplicationController
         redirect_to timesheet_importer_index_path
         return
       end
-        iip = TimesheetImportInProgress.new(:user_id => User.current.id)
+		iip = TimesheetImportInProgress.new
+		iip.user_id = User.current.id
         iip.quote_char = params[:wrapper]
         iip.col_sep = params[:splitter]
         iip.encoding = params[:encoding]
@@ -407,7 +407,7 @@ class TimesheetImporterController < ApplicationController
             #else
             #  logger.info "#{index} USER IS NOT ALLOWED TO UPDATE ISSUE"
             #end
-            unless @issue.watched_by?(@user) || @user.id == @issue.assigned_to_id || (@tracker_non_productive.id == @issue.tracker.id && @user.member_of?(@issue.project))
+            unless @issue.watched_by?(@user) || @user.id == @issue.assigned_to_id || (@tracker_non_productive.id == @issue.tracker.id && @user.member_of?(@issue.project)) || @user.allowed_to?(:timesheet_import, nil, {:global => :true})
               unless @tracker_non_productive.id == @issue.tracker.id && row[attrs_map[:hours]] == nil
                 @errs[:login][index] = true
                 @errs[:id][index] = true
@@ -477,7 +477,7 @@ class TimesheetImporterController < ApplicationController
 
   end
 
-private
+private  
 
 
   def flash_message(type, text)
